@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VegMenu</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div class="popup-wrap">
+
+    <!-- Header -->
+    <div class="popup-header">
+      <div class="header-row">
+        <span class="header-icon">🌿</span>
+        <span class="header-title">VegMenu</span>
+      </div>
+      <div class="header-sub">Vegetarian Menu Filter</div>
+    </div>
+
+    <!-- Body -->
+    <div class="popup-body">
+
+      <!-- Server status -->
+      <div class="section">
+        <div class="section-label">Backend Server</div>
+        <div id="server-status" class="server-status checking">
+          <span class="status-dot"></span>
+          <span id="server-status-text">Checking…</span>
+        </div>
+        <div class="hint">
+          Start with: <code>cd backend &amp;&amp; npm start</code>
+        </div>
+        <button id="recheck-btn" class="recheck-btn">↻ Recheck</button>
+      </div>
+
+      <hr class="divider" />
+
+      <!-- Scan button -->
+      <button id="scan-btn" class="scan-btn">
+        <span id="scan-icon">🔍</span>
+        <span id="scan-label">Scan This Page</span>
+      </button>
+
+      <!-- Status -->
+      <div id="status" class="status hidden"></div>
+
+      <hr class="divider" />
+
+      <!-- Scan settings -->
+      <div class="section">
+        <div class="section-label">Scan Settings</div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-name">Always On</div>
+            <div class="setting-desc">Auto-scan every page when it loads</div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="always-on" />
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Dietary filters -->
+      <div class="section">
+        <div class="section-label">Dietary Filters</div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-name">Vegetarian <span class="default-tag">default</span></div>
+            <div class="setting-desc">No meat, poultry, or seafood</div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="filter-veg" checked disabled />
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-name">Vegan</div>
+            <div class="setting-desc">No animal products at all</div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="filter-vegan" />
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-name">Plant-Based Only</div>
+            <div class="setting-desc">Primarily from plants</div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="filter-plant" />
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Display mode -->
+      <div class="section">
+        <div class="section-label">Display Mode</div>
+        <select id="display-mode" class="select-input">
+          <option value="list">List Only</option>
+          <option value="overlay">Overlay on Original</option>
+        </select>
+        <div class="hint">How filtered results appear on the page</div>
+      </div>
+
+    </div><!-- /popup-body -->
+
+    <!-- Footer -->
+    <div class="popup-footer">
+      <button id="save-btn" class="save-btn">Save Settings</button>
+    </div>
+
+  </div><!-- /popup-wrap -->
+  <script src="popup.js"></script>
+</body>
+</html>

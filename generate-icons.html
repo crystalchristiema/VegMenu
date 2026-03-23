@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>VegMenu – Icon Generator</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+           background: #f5f6f8; padding: 30px; color: #333; }
+    h1   { color: #27AE60; margin-bottom: 6px; }
+    p    { color: #666; margin-bottom: 20px; }
+    .previews { display: flex; gap: 24px; flex-wrap: wrap; margin: 20px 0; }
+    .icon-card {
+      background: #fff; border-radius: 12px;
+      padding: 20px; text-align: center;
+      box-shadow: 0 2px 12px rgba(0,0,0,.08);
+    }
+    .icon-card img { display: block; margin: 0 auto 10px; image-rendering: pixelated; }
+    .icon-card p   { font-size: 12px; color: #999; margin: 0 0 10px; }
+    button {
+      padding: 10px 20px; background: #27AE60; color: #fff;
+      border: none; border-radius: 8px; cursor: pointer;
+      font-size: 14px; font-weight: 600;
+    }
+    button:hover { background: #219A52; }
+    .dl-btn {
+      display: inline-block; margin-top: 6px;
+      padding: 7px 14px; background: #27AE60; color: #fff;
+      border: none; border-radius: 7px; cursor: pointer;
+      font-size: 12px; font-weight: 600;
+    }
+    .instructions {
+      background: #fff; border-radius: 12px;
+      padding: 20px 24px; margin-top: 24px;
+      box-shadow: 0 2px 12px rgba(0,0,0,.08);
+    }
+    code { background: #f0f0f0; padding: 2px 6px; border-radius: 4px; font-size: 13px; }
+    ol li { margin-bottom: 8px; line-height: 1.6; }
+  </style>
+</head>
+<body>
+  <h1>🌿 VegMenu – Icon Generator</h1>
+  <p>Generate the three PNG icons required by the Chrome extension.</p>
+
+  <button onclick="generateAll()">Generate &amp; Preview Icons</button>
+
+  <div class="previews" id="previews"></div>
+
+  <canvas id="offscreen" style="display:none"></canvas>
+
+  <div class="instructions">
+    <h3>Setup Instructions</h3>
+    <ol>
+      <li>Click <strong>Generate &amp; Preview Icons</strong> above.</li>
+      <li>Download each icon using the button beneath it.</li>
+      <li>Place the downloaded files inside the <code>icons/</code> folder in your VegMenu extension directory:
+        <br><code>icons/icon16.png</code>, <code>icons/icon48.png</code>, <code>icons/icon128.png</code>
+      </li>
+      <li>Open <strong>Chrome → chrome://extensions</strong>, enable <em>Developer mode</em>, click
+          <strong>Load unpacked</strong>, and select the VegMenu folder.</li>
+    </ol>
+    <p style="margin-top:14px;color:#aaa;font-size:12px">
+      Note: the extension loads fine without custom icons (Chrome shows a default puzzle icon),
+      so you can skip this step while developing.
+    </p>
+  </div>
+
+  <script>
+    function drawIcon(size) {
+      const canvas = document.getElementById('offscreen');
+      canvas.width  = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      const c   = size / 2;   // center
+      const s   = size / 128; // scale relative to 128 px master
+
+      /* ── Background: green circle ── */
+      const grad = ctx.createRadialGradient(c, c * 0.85, 0, c, c, c);
+      grad.addColorStop(0, '#2ECC71');
+      grad.addColorStop(1, '#1A8C4E');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(c, c, c, 0, Math.PI * 2);
+      ctx.fill();
+
+      /* ── Leaf body ── */
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.moveTo(c, c - 38 * s);
+      ctx.bezierCurveTo(c + 32 * s, c - 38 * s, c + 44 * s, c + 4 * s, c, c + 33 * s);
+      ctx.bezierCurveTo(c - 44 * s, c + 4 * s, c - 32 * s, c - 38 * s, c, c - 38 * s);
+      ctx.closePath();
+      ctx.fill();
+
+      /* ── Centre vein ── */
+      ctx.strokeStyle = 'rgba(39,174,96,.55)';
+      ctx.lineWidth   = Math.max(1, 2 * s);
+      ctx.lineCap     = 'round';
+      ctx.beginPath();
+      ctx.moveTo(c, c - 38 * s);
+      ctx.lineTo(c, c + 33 * s);
+      ctx.stroke();
+
+      /* ── Side veins ── */
+      ctx.strokeStyle = 'rgba(39,174,96,.35)';
+      ctx.lineWidth   = Math.max(0.5, 1.2 * s);
+      [[-1, 0.35], [-1, 0.65], [1, 0.35], [1, 0.65]].forEach(([side, t]) => {
+        const y0 = (c - 38 * s) + t * 71 * s;
+        ctx.beginPath();
+        ctx.moveTo(c, y0);
+        ctx.lineTo(c + side * 28 * s, y0 - 10 * s);
+        ctx.stroke();
+      });
+
+      /* ── Stem ── */
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth   = Math.max(1, 2.5 * s);
+      ctx.beginPath();
+      ctx.moveTo(c, c + 33 * s);
+      ctx.quadraticCurveTo(c - 10 * s, c + 52 * s, c - 4 * s, c + 52 * s);
+      ctx.stroke();
+
+      return canvas.toDataURL('image/png');
+    }
+
+    function generateAll() {
+      const container = document.getElementById('previews');
+      container.innerHTML = '';
+
+      [16, 48, 128].forEach(size => {
+        const dataUrl = drawIcon(size);
+
+        const card = document.createElement('div');
+        card.className = 'icon-card';
+
+        const img = document.createElement('img');
+        img.src    = dataUrl;
+        img.width  = Math.max(size, 64); // show at least 64 px for tiny icons
+        img.height = Math.max(size, 64);
+        img.title  = `${size}×${size}`;
+
+        const label = document.createElement('p');
+        label.textContent = `${size} × ${size} px`;
+
+        const btn = document.createElement('button');
+        btn.className   = 'dl-btn';
+        btn.textContent = `⬇ Download icon${size}.png`;
+        btn.onclick = () => {
+          const a      = document.createElement('a');
+          a.href       = dataUrl;
+          a.download   = `icon${size}.png`;
+          a.click();
+        };
+
+        card.append(img, label, btn);
+        container.appendChild(card);
+      });
+    }
+  </script>
+</body>
+</html>
