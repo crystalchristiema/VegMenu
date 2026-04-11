@@ -279,7 +279,9 @@ app.get('/api/health', (_req, res) => {
 });
 
 app.post('/api/scan-menu', async (req, res) => {
-  const { images = [], text = '', filterType = 'vegetarian' } = req.body;
+  const { images = [], text = '', filterType = 'vegetarian', mode = 'popup' } = req.body;
+  // mode: 'highlight' = fast name-list only (for on-page highlights, ~1-2s)
+  //       'popup'     = full categorization (for accordion panel, ~20s)
 
   if (!process.env.ANTHROPIC_API_KEY) {
     return res.status(500).json({
@@ -300,45 +302,92 @@ app.post('/api/scan-menu', async (req, res) => {
 
   // ── Text analysis ───────────────────────────────────────────────────────────
   if (text.trim()) {
-    const prompt =
-      `Below is text extracted from a webpage. Does it contain a restaurant menu?\n` +
-      `If yes, list ALL items on it — vegetarian AND non-vegetarian.\n\n` +
-      jsonRules() + '\n\n' +
-      `Additional rule: set isMenu=true only if the text clearly contains ` +
-      `food items with descriptions or prices — not just mentions of a menu.\n\n` +
-      `PAGE TEXT:\n${text}`;
-
     const t0text = Date.now();
-    console.log('\n[VegMenu] ── Text Analysis (Haiku) ─────────────────────────');
-    console.log(`[VegMenu] ${text.length} chars of page text`);
 
-    try {
-      const msg = await anthropic.messages.create({
-        model: MODEL_FAST, max_tokens: 4096,  // Haiku: faster + cheaper for text
-        messages: [{ role: 'user', content: prompt }]
-      });
-      totalIn  += msg.usage.input_tokens;
-      totalOut += msg.usage.output_tokens;
-      console.log(`[VegMenu] Text analysis: ${elapsed(t0text)} (${msg.usage.input_tokens} in / ${msg.usage.output_tokens} out tokens)`);
+    if (mode === 'highlight') {
+      // ── HIGHLIGHT MODE: name-list only, ~1-2s ──────────────────────────────
+      console.log('\n[VegMenu] ── HIGHLIGHT MODE (Haiku, names only) ──────────────');
+      console.log(`[VegMenu] ${text.length} chars of page text`);
 
-      const parsed = parseJSON(msg.content[0].text);
-      const { categories, vegetarianItems, allItems } =
-        processCategories(parsed.categories, filterType, parsed.allItems);
+      const hlPrompt =
+        `Below is text from a webpage. If it's a restaurant menu, list the ` +
+        `${filterDescription(filterType)} item names only.\n\n` +
+        `Respond ONLY with valid JSON — no markdown, no explanation:\n` +
+        `{"isMenu":true,"vegetarianNames":["Item Name 1","Item Name 2"]}\n\n` +
+        `Rules:\n` +
+        `- isMenu: true only if text clearly contains food items with descriptions or prices\n` +
+        `- vegetarianNames: exact item names that are ${filterDescription(filterType)}\n` +
+        `- If not a menu: {"isMenu":false,"vegetarianNames":[]}\n` +
+        `JSON safety: escape double-quotes inside strings as \\"\n\n` +
+        `PAGE TEXT:\n${text}`;
 
-      console.log('\n[VegMenu] Claude categories (vegetarian items only):');
-      logCategories(categories);
-      console.log(`[VegMenu] ${vegetarianItems.length} veg / ${allItems.length} total items`);
+      try {
+        const msg = await anthropic.messages.create({
+          model: MODEL_FAST, max_tokens: 512,  // names only — tiny output
+          messages: [{ role: 'user', content: hlPrompt }]
+        });
+        totalIn  += msg.usage.input_tokens;
+        totalOut += msg.usage.output_tokens;
+        console.log(`[VegMenu] Highlight extraction: ${elapsed(t0text)} (${msg.usage.input_tokens} in / ${msg.usage.output_tokens} out tokens)`);
 
-      textMenus.push({
-        isMenu:     parsed.isMenu     ?? false,
-        confidence: parsed.confidence ?? 0,
-        categories,
-        vegetarianItems,
-        allItems
-      });
-    } catch (err) {
-      console.error('[VegMenu] Text analysis failed:', err.message);
-      // Non-fatal: image scanning can still proceed
+        const parsed = parseJSON(msg.content[0].text);
+        const names  = parsed.vegetarianNames || [];
+        const vegetarianItems = names.map(n => ({ name: n, isVegetarian: true, isVegan: false }));
+        console.log(`[VegMenu] ${vegetarianItems.length} vegetarian names extracted`);
+        if (vegetarianItems.length) console.log(`[VegMenu] Names: ${names.join(', ')}`);
+
+        textMenus.push({
+          isMenu:     parsed.isMenu ?? false,
+          confidence: parsed.confidence ?? 80,
+          categories:      [],
+          vegetarianItems,
+          allItems:        []
+        });
+      } catch (err) {
+        console.error('[VegMenu] Highlight extraction failed:', err.message);
+      }
+
+    } else {
+      // ── POPUP MODE: full categorization, ~20s ──────────────────────────────
+      console.log('\n[VegMenu] ── POPUP MODE — Text Analysis (Haiku) ─────────────');
+      console.log(`[VegMenu] ${text.length} chars of page text`);
+
+      const prompt =
+        `Below is text extracted from a webpage. Does it contain a restaurant menu?\n` +
+        `If yes, list ALL items on it — vegetarian AND non-vegetarian.\n\n` +
+        jsonRules() + '\n\n' +
+        `Additional rule: set isMenu=true only if the text clearly contains ` +
+        `food items with descriptions or prices — not just mentions of a menu.\n\n` +
+        `PAGE TEXT:\n${text}`;
+
+      try {
+        const msg = await anthropic.messages.create({
+          model: MODEL_FAST, max_tokens: 4096,
+          messages: [{ role: 'user', content: prompt }]
+        });
+        totalIn  += msg.usage.input_tokens;
+        totalOut += msg.usage.output_tokens;
+        console.log(`[VegMenu] Text analysis: ${elapsed(t0text)} (${msg.usage.input_tokens} in / ${msg.usage.output_tokens} out tokens)`);
+
+        const parsed = parseJSON(msg.content[0].text);
+        const { categories, vegetarianItems, allItems } =
+          processCategories(parsed.categories, filterType, parsed.allItems);
+
+        console.log('\n[VegMenu] Claude categories (vegetarian items only):');
+        logCategories(categories);
+        console.log(`[VegMenu] ${vegetarianItems.length} veg / ${allItems.length} total items`);
+
+        textMenus.push({
+          isMenu:     parsed.isMenu     ?? false,
+          confidence: parsed.confidence ?? 0,
+          categories,
+          vegetarianItems,
+          allItems
+        });
+      } catch (err) {
+        console.error('[VegMenu] Text analysis failed:', err.message);
+        // Non-fatal: image scanning can still proceed
+      }
     }
   }
 
