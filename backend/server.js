@@ -47,12 +47,14 @@ function filterDescription(filterType) {
   const map = {
     vegetarian:    'vegetarian (no meat, poultry, or seafood)',
     vegan:         'vegan (no animal products whatsoever)',
-    'plant-based': 'plant-based (made primarily from plants, minimal or no animal products)'
+    'plant-based': 'plant-based (made primarily from plants, minimal or no animal products)',
+    'low-fodmap':  'low FODMAP (low fermentable carbohydrates: avoid wheat, onions, garlic, beans, high-fructose fruits, high-lactose dairy, sugar alcohols)',
+    keto:          'keto (high fat, very low carb: include meat, fish, eggs, full-fat dairy, oils, nuts, seeds, low-carb vegetables; exclude bread, pasta, rice, sugar, high-carb fruits)'
   };
   return map[filterType] || map.vegetarian;
 }
 
-const ITEM_SCHEMA = '{"name":"","description":"","price":"","isVegetarian":false,"isVegan":false}';
+const ITEM_SCHEMA = '{"name":"","description":"","price":"","isVegetarian":false,"isVegan":false,"isLowFodmap":false,"isKeto":false}';
 
 const DRINKS_SUBCATS = [
   'Cocktails','Zero Proof Spirits','Sparkling Wine','Natural Wine',
@@ -61,6 +63,8 @@ const DRINKS_SUBCATS = [
 
 function itemMatchesFilter(item, filterType) {
   if (filterType === 'vegan') return !!item.isVegan;
+  if (filterType === 'low-fodmap') return !!item.isLowFodmap;
+  if (filterType === 'keto') return !!item.isKeto;
   return !!item.isVegetarian;
 }
 
@@ -117,6 +121,8 @@ function jsonRules() {
     `  - Include every item regardless of dietary type\n` +
     `  - "isVegetarian": true if no meat, poultry, or seafood\n` +
     `  - "isVegan": true if no animal products at all\n` +
+    `  - "isLowFodmap": true if low in fermentable carbohydrates (avoid wheat, onions, garlic, beans, high-fructose fruits, high-lactose dairy, sugar alcohols)\n` +
+    `  - "isKeto": true if suitable for ketogenic diet (high fat, very low carb: meat, fish, eggs, full-fat dairy, oils, nuts, low-carb vegetables; avoid bread, pasta, rice, sugar, high-carb fruits)\n` +
     `- If not a menu: isMenu=false, confidence=..., categories=[]\n` +
     `JSON safety:\n` +
     `- Escape double-quotes inside strings as \\"\n` +
@@ -305,25 +311,45 @@ app.post('/api/scan-menu', async (req, res) => {
     const t0text = Date.now();
 
     if (mode === 'highlight') {
-      // ── HIGHLIGHT MODE: name-list only, ~1-2s ──────────────────────────────
-      console.log('\n[VegMenu] ── HIGHLIGHT MODE (Haiku, names only) ──────────────');
+      // ── HIGHLIGHT MODE: ingredient analysis, ~1-2s ──────────────────────────
+      console.log('\n[VegMenu] ── HIGHLIGHT MODE (Haiku, ingredient analysis) ──────');
       console.log(`[VegMenu] ${text.length} chars of page text`);
 
       const hlPrompt =
-        `Below is text from a webpage. If it's a restaurant menu, list the ` +
-        `${filterDescription(filterType)} item names only.\n\n` +
-        `Respond ONLY with valid JSON — no markdown, no explanation:\n` +
-        `{"isMenu":true,"vegetarianNames":["Item Name 1","Item Name 2"]}\n\n` +
+        `Below is text from a webpage. If it's a restaurant menu, analyze each item and its ingredients.\n\n` +
+        `Task: Identify all items that match the filter "${filterDescription(filterType)}".\n\n` +
+        `Filtering rules:\n` +
+        `- Vegetarian: NO meat, poultry, seafood, or meat-based stocks/broths\n` +
+        `- Vegan: NO animal products at all (no dairy, eggs, honey, meat, seafood, etc.)\n` +
+        `- Plant-based: Made primarily from plants; minimal or no animal products\n` +
+        `- Low FODMAP: Avoid wheat, onions, garlic, beans, high-fructose fruits, high-lactose dairy, sugar alcohols\n` +
+        `- Keto: High fat, very low carb; include meat, fish, eggs, full-fat dairy, oils, nuts, seeds, low-carb vegetables; exclude bread, pasta, rice, sugar, high-carb fruits\n` +
+        `- If an ingredient is ambiguous (e.g., "sauce" with no details), err on the side of caution and mark as non-matching\n\n` +
+        `Response format (ONLY valid JSON, no markdown, no explanation):\n` +
+        `{
+  "isMenu": boolean,
+  "vegetarianItems": [
+    {"name": "Item Name", "ingredients": ["ingredient 1", "ingredient 2", ...]},
+    ...
+  ],
+  "nonVegetarianItems": [
+    {"name": "Item Name", "ingredients": [...], "reason": "contains X"},
+    ...
+  ]
+}\n\n` +
         `Rules:\n` +
+        `- Extract ALL menu items and their ingredients from the text\n` +
+        `- For each item, check if ALL ingredients match the "${filterDescription(filterType)}" criteria\n` +
+        `- List matched items in "vegetarianItems" with extracted ingredients\n` +
+        `- List non-matched items in "nonVegetarianItems" with reason field explaining why\n` +
         `- isMenu: true only if text clearly contains food items with descriptions or prices\n` +
-        `- vegetarianNames: exact item names that are ${filterDescription(filterType)}\n` +
-        `- If not a menu: {"isMenu":false,"vegetarianNames":[]}\n` +
-        `JSON safety: escape double-quotes inside strings as \\"\n\n` +
+        `- If not a menu: {"isMenu": false, "vegetarianItems": [], "nonVegetarianItems": []}\n` +
+        `- JSON safety: escape double-quotes inside strings as \\"\n\n` +
         `PAGE TEXT:\n${text}`;
 
       try {
         const msg = await anthropic.messages.create({
-          model: MODEL_FAST, max_tokens: 512,  // names only — tiny output
+          model: MODEL_FAST, max_tokens: 1024,  // slightly higher for ingredients
           messages: [{ role: 'user', content: hlPrompt }]
         });
         totalIn  += msg.usage.input_tokens;
@@ -331,16 +357,26 @@ app.post('/api/scan-menu', async (req, res) => {
         console.log(`[VegMenu] Highlight extraction: ${elapsed(t0text)} (${msg.usage.input_tokens} in / ${msg.usage.output_tokens} out tokens)`);
 
         const parsed = parseJSON(msg.content[0].text);
-        const names  = parsed.vegetarianNames || [];
-        const vegetarianItems = names.map(n => ({ name: n, isVegetarian: true, isVegan: false }));
-        console.log(`[VegMenu] ${vegetarianItems.length} vegetarian names extracted`);
-        if (vegetarianItems.length) console.log(`[VegMenu] Names: ${names.join(', ')}`);
+        const vegItems = parsed.vegetarianItems || [];
+        const nonVegItems = parsed.nonVegetarianItems || [];
+
+        const matchingItems = vegItems.map(item => {
+          const obj = { name: item.name || '', isVegetarian: false, isVegan: false, isLowFodmap: false, isKeto: false };
+          if (filterType === 'vegan') obj.isVegan = true;
+          else if (filterType === 'low-fodmap') obj.isLowFodmap = true;
+          else if (filterType === 'keto') obj.isKeto = true;
+          else obj.isVegetarian = true;
+          return obj;
+        });
+        console.log(`[VegMenu] ${matchingItems.length} ${filterType} items extracted from ingredients`);
+        if (matchingItems.length) console.log(`[VegMenu] Items: ${matchingItems.map(i => i.name).join(', ')}`);
+        if (nonVegItems.length) console.log(`[VegMenu] Non-matching: ${nonVegItems.map(i => `${i.name} (${i.reason})`).join(', ')}`);
 
         textMenus.push({
           isMenu:     parsed.isMenu ?? false,
           confidence: parsed.confidence ?? 80,
           categories:      [],
-          vegetarianItems,
+          vegetarianItems: matchingItems,
           allItems:        []
         });
       } catch (err) {
